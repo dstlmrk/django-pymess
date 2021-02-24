@@ -3,6 +3,7 @@ import import_string
 from chamber.models import SmartModel
 from chamber.utils.datastructures import ChoicesNumEnum
 from django.core.exceptions import ValidationError
+from django.core.files.base import ContentFile
 from django.db import models
 from django.utils.translation import ugettext, ugettext_lazy as _
 from django.template import Template, Context
@@ -11,7 +12,7 @@ from django.template.exceptions import TemplateSyntaxError, TemplateDoesNotExist
 from pymess.config import settings
 from pymess.utils.html import raise_error_if_contains_banned_tags
 
-from .common import BaseAbstractTemplate, BaseMessage, BaseRelatedObject
+from .common import BaseAbstractTemplate, BaseMessage, BaseRelatedObject, MessageQueryset
 
 
 __all__ = (
@@ -22,6 +23,14 @@ __all__ = (
     'AbstractEmailTemplate',
     'EmailTemplateDisallowedObject',
 )
+
+
+class EmailMessageQuerySet(MessageQueryset):
+
+    def create(self, content, **kwargs):
+        message = super().create(**kwargs)
+        message.content_file.save('content.txt', ContentFile(content.encode()))
+        return message
 
 
 class EmailMessage(BaseMessage):
@@ -56,6 +65,19 @@ class EmailMessage(BaseMessage):
         blank=True,
         editable=False,
     )
+    content = models.TextField(
+        verbose_name=_('content'),
+        null=True,
+        blank=True
+    )
+    content_file = models.FileField(
+        verbose_name=_('content file'),
+        null=True,
+        blank=True,
+        upload_to='pymess/e-mails/',
+    )
+
+    objects = EmailMessageQuerySet.as_manager()
 
     class Meta(BaseMessage.Meta):
         verbose_name = _('e-mail message')
@@ -74,6 +96,14 @@ class EmailMessage(BaseMessage):
     @property
     def failed(self):
         return self.state in {self.STATE.ERROR, self.STATE.ERROR_RETRY}
+
+    @cached_property
+    def content(self):
+        if self.content_file:
+            with self.content_file.open() as f:
+                return f.read().decode()
+        else
+            return self.old_content
 
 
 class EmailRelatedObject(BaseRelatedObject):
